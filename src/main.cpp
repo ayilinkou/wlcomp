@@ -17,9 +17,24 @@ struct Server
     wlr_output_layout* output_layout = nullptr;
     wlr_scene* scene = nullptr;
     wlr_scene_output_layout* scene_output_layout = nullptr;
+    wlr_xdg_shell* xdg_shell = nullptr;
+    wlr_seat* seat = nullptr;
 
     wl_listener new_output_listener = {};
+    wl_listener new_xdg_toplevel_listener = {};
 };
+
+// called whenever an application wants a window
+static void handle_new_xdg_toplevel(wl_listener* listener, void* data)
+{
+    Server* server =
+        wl_container_of(listener, server, new_xdg_toplevel_listener);
+    wlr_xdg_toplevel* toplevel = static_cast<wlr_xdg_toplevel*>(data);
+
+    std::cout << std::format("New xdg toplevel: title=\"{}\" app_id=\"{}\"\n",
+                             toplevel->title ? toplevel->title : "(none)",
+                             toplevel->app_id ? toplevel->app_id : "(none)");
+}
 
 // called whenever the backend detects a new output
 static void handle_new_output(wl_listener* listener, void* data)
@@ -58,6 +73,8 @@ static void handle_new_output(wl_listener* listener, void* data)
 
 int main()
 {
+    wlr_log_init(WLR_DEBUG, nullptr);
+
     Server server{};
 
     // create display
@@ -112,6 +129,16 @@ int main()
     server.new_output_listener.notify = handle_new_output;
     wl_signal_add(&server.backend->events.new_output,
                   &server.new_output_listener);
+
+    uint32_t shell_protocol_version = 3u;
+    server.xdg_shell =
+        wlr_xdg_shell_create(server.display, shell_protocol_version);
+    server.new_xdg_toplevel_listener.notify = handle_new_xdg_toplevel;
+    wl_signal_add(&server.xdg_shell->events.new_toplevel,
+                  &server.new_xdg_toplevel_listener);
+
+    // TODO: add listeners
+    server.seat = wlr_seat_create(server.display, "seat0");
 
     const char* socket = wl_display_add_socket_auto(server.display);
     if (socket == nullptr)
