@@ -1,13 +1,10 @@
-// wlroots.hpp
-//
-// Single include point for all wlroots/wayland C headers.
-// Handles two recurring C++ interop problems:
-//   1. wlroots headers aren't wrapped in extern "C", so symbols get
-//      C++-mangled unless we do it ourselves here.
-//   2. A few headers use "class" / "namespace" / "static" which are
-//		reserved keywords in C++ and fail to compile as-is.
-//
-// Include this instead of any individual <wlr/...> header.
+/*  Single include point for all wlroots/wayland C headers.
+	Handles two recurring C++ interop problems:
+	1. wlroots headers aren't wrapped in extern "C", so symbols get
+		C++-mangled unless we do it ourselves here.
+	2. A few headers use "class" / "namespace" / "static" which are
+		reserved keywords in C++ and fail to compile as-is.
+*/
 
 #pragma once
 
@@ -17,7 +14,8 @@
 #define namespace namespace_
 #define static
 
-extern "C" {
+extern "C"
+{
 #include <wlr/backend.h>
 #include <wlr/render/allocator.h>
 #include <wlr/render/wlr_renderer.h>
