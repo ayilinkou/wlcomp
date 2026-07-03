@@ -1,5 +1,6 @@
 #include <cstdio>
 #include <cstdlib>
+#include <ctime>
 #include <format>
 #include <iostream>
 #include <wayland-protocols/xdg-shell-enum.h>
@@ -32,8 +33,30 @@ struct Toplevel
 
     wl_listener map_listener = {};
     wl_listener unmap_listener = {};
+    wl_listener commit_listener = {};
     wl_listener destroy_listener = {};
 };
+
+struct Output
+{
+    Server* server = nullptr;
+    wlr_output* wlr_output_ptr = nullptr;
+    wl_listener frame_listener = {};
+};
+
+static void handle_output_frame(wl_listener* listener, void* data)
+{
+    Output* output = wl_container_of(listener, output, frame_listener);
+
+    wlr_scene_output* scene_output = wlr_scene_get_scene_output(
+        output->server->scene, output->wlr_output_ptr);
+
+    wlr_scene_output_commit(scene_output, nullptr);
+
+    timespec now;
+    clock_gettime(CLOCK_MONOTONIC, &now);
+    wlr_scene_output_send_frame_done(scene_output, &now);
+}
 
 // called whenever the backend detects a new output
 static void handle_new_output(wl_listener* listener, void* data)
@@ -65,10 +88,18 @@ static void handle_new_output(wl_listener* listener, void* data)
     wlr_scene_output_layout_add_output(server->scene_output_layout,
                                        layout_output, scene_output);
 
+    Output* output = new Output();
+    output->server = server;
+    output->wlr_output_ptr = wlr_output_ptr;
+    output->frame_listener.notify = handle_output_frame;
+    wl_signal_add(&wlr_output_ptr->events.frame, &output->frame_listener);
+
     auto msg = std::format("New output: {} ({}x{})\n", wlr_output_ptr->name,
                            wlr_output_ptr->width, wlr_output_ptr->height);
     std::cout << msg;
 }
+
+// TODO: handle output's destroy event
 
 static void handle_toplevel_map(wl_listener* listener, void* data)
 {
@@ -84,6 +115,19 @@ static void handle_toplevel_unmap(wl_listener* listener, void* data)
     std::cout << "Toplevel unmapped\n";
     // Surface no longer visible — wlr_scene handles hiding it once its
     // backing surface is unmapped, so nothing to do manually here either.
+}
+
+static void handle_toplevel_commit(wl_listener* listener, void* data)
+{
+    Toplevel* toplevel = wl_container_of(listener, toplevel, commit_listener);
+
+    if (toplevel->xdg_toplevel->base->initial_commit)
+    {
+        // The protocol requires the compositor to respond to a client's
+        // first commit with a configure event before it's allowed to
+        // attach real content. Setting size (0, 0) means "you choose."
+        wlr_xdg_toplevel_set_size(toplevel->xdg_toplevel, 0, 0);
+    }
 }
 
 static void handle_toplevel_destroy(wl_listener* listener, void* data)
@@ -117,6 +161,10 @@ static void handle_new_xdg_toplevel(wl_listener* listener, void* data)
     toplevel->unmap_listener.notify = handle_toplevel_unmap;
     wl_signal_add(&xdg_toplevel->base->surface->events.unmap,
                   &toplevel->unmap_listener);
+
+    toplevel->commit_listener.notify = handle_toplevel_commit;
+    wl_signal_add(&xdg_toplevel->base->surface->events.commit,
+                  &toplevel->commit_listener);
 
     toplevel->destroy_listener.notify = handle_toplevel_destroy;
     wl_signal_add(&xdg_toplevel->events.destroy, &toplevel->destroy_listener);
