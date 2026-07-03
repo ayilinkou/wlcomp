@@ -2,6 +2,7 @@
 #include <cstdlib>
 #include <format>
 #include <iostream>
+#include <wayland-protocols/xdg-shell-enum.h>
 #include <wayland-server-core.h>
 #include <wayland-util.h>
 
@@ -24,17 +25,15 @@ struct Server
     wl_listener new_xdg_toplevel_listener = {};
 };
 
-// called whenever an application wants a window
-static void handle_new_xdg_toplevel(wl_listener* listener, void* data)
+struct Toplevel
 {
-    Server* server =
-        wl_container_of(listener, server, new_xdg_toplevel_listener);
-    wlr_xdg_toplevel* toplevel = static_cast<wlr_xdg_toplevel*>(data);
+    wlr_xdg_toplevel* xdg_toplevel = nullptr;
+    wlr_scene_tree* scene_tree = nullptr;
 
-    std::cout << std::format("New xdg toplevel: title=\"{}\" app_id=\"{}\"\n",
-                             toplevel->title ? toplevel->title : "(none)",
-                             toplevel->app_id ? toplevel->app_id : "(none)");
-}
+    wl_listener map_listener = {};
+    wl_listener unmap_listener = {};
+    wl_listener destroy_listener = {};
+};
 
 // called whenever the backend detects a new output
 static void handle_new_output(wl_listener* listener, void* data)
@@ -69,6 +68,58 @@ static void handle_new_output(wl_listener* listener, void* data)
     auto msg = std::format("New output: {} ({}x{})\n", wlr_output_ptr->name,
                            wlr_output_ptr->width, wlr_output_ptr->height);
     std::cout << msg;
+}
+
+static void handle_toplevel_map(wl_listener* listener, void* data)
+{
+    Toplevel* toplevel = wl_container_of(listener, toplevel, map_listener);
+    std::cout << "Toplevel mapped\n";
+    // Content now visible — nothing else needed here yet, the scene_tree
+    // was already added to the graph back in handle_new_xdg_toplevel.
+}
+
+static void handle_toplevel_unmap(wl_listener* listener, void* data)
+{
+    Toplevel* toplevel = wl_container_of(listener, toplevel, unmap_listener);
+    std::cout << "Toplevel unmapped\n";
+    // Surface no longer visible — wlr_scene handles hiding it once its
+    // backing surface is unmapped, so nothing to do manually here either.
+}
+
+static void handle_toplevel_destroy(wl_listener* listener, void* data)
+{
+    Toplevel* toplevel = wl_container_of(listener, toplevel, destroy_listener);
+    std::cout << "Toplevel destroyed\n";
+    delete toplevel;
+}
+
+// called whenever an application wants a window
+static void handle_new_xdg_toplevel(wl_listener* listener, void* data)
+{
+    Server* server =
+        wl_container_of(listener, server, new_xdg_toplevel_listener);
+    wlr_xdg_toplevel* xdg_toplevel = static_cast<wlr_xdg_toplevel*>(data);
+
+    std::cout << std::format(
+        "New xdg toplevel: title=\"{}\" app_id=\"{}\"\n",
+        xdg_toplevel->title ? xdg_toplevel->title : "(none)",
+        xdg_toplevel->app_id ? xdg_toplevel->app_id : "(none)");
+
+    Toplevel* toplevel = new Toplevel();
+    toplevel->xdg_toplevel = xdg_toplevel;
+    toplevel->scene_tree =
+        wlr_scene_xdg_surface_create(&server->scene->tree, xdg_toplevel->base);
+
+    toplevel->map_listener.notify = handle_toplevel_map;
+    wl_signal_add(&xdg_toplevel->base->surface->events.map,
+                  &toplevel->map_listener);
+
+    toplevel->unmap_listener.notify = handle_toplevel_unmap;
+    wl_signal_add(&xdg_toplevel->base->surface->events.unmap,
+                  &toplevel->unmap_listener);
+
+    toplevel->destroy_listener.notify = handle_toplevel_destroy;
+    wl_signal_add(&xdg_toplevel->events.destroy, &toplevel->destroy_listener);
 }
 
 int main()
